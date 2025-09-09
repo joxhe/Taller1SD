@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Resultados — {{ query }}</title>
+    <script>
+      let progresoInterval = null;
+
+      function iniciarProcesamiento(xmlFilename) {
+        fetch(`/procesar?xml_path=${encodeURIComponent(xmlFilename)}`)
+          .then(resp => resp.json())
+          .then(data => {
+            if (data.status) {
+              document.getElementById("status").innerText = data.status;
+              // iniciar polling de progreso
+              progresoInterval = setInterval(() => {
+                fetch("/progreso")
+                  .then(resp => resp.json())
+                  .then(p => {
+                    if (p.error) {
+                      document.getElementById("progreso").innerText = p.error;
+                      clearInterval(progresoInterval);
+                      return;
+                    }
+                    document.getElementById("progreso").innerText =
+                      `Procesados: ${p.procesados}/${p.total} — Tiempo: ${p.elapsed}s`;
+
+                    if (p.done) {
+                      document.getElementById("status").innerText = "✅ Procesamiento finalizado";
+                      clearInterval(progresoInterval);
+                    }
+                  });
+              }, 1000);
+            } else if (data.error) {
+              document.getElementById("status").innerText = "❌ " + data.error;
+            }
+          });
+      }
+    </script>
+  </head>
+  <body>
+    <a href="/">← Nueva búsqueda</a>
+
+    <h2>Resultados para: “{{ query }}”</h2>
+
+    <p><strong>Total global (API arXiv):</strong> {{ total }}</p>
+    <p><strong>Devueltos en esta página:</strong> {{ returned }}</p>
+    <p><strong>Archivo XML guardado:</strong> {{ xml_filename }}</p>
+
+    <form action="/buscar" method="get" style="margin-top:1rem">
+      <input type="hidden" name="q" value="{{ query }}" />
+      <input type="hidden" name="max" value="{{ max_results }}" />
+      <input type="hidden" name="start" value="{{ start + max_results }}" />
+      <button type="submit">Siguiente página →</button>
+    </form>
+
+    <hr>
+    <h3>Procesamiento Concurrente</h3>
+    <button onclick="iniciarProcesamiento('{{ xml_filename }}')">Procesar artículos</button>
+    <p id="status"></p>
+    <p id="progreso"></p>
+  </body>
+</html>

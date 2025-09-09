@@ -1,0 +1,10 @@
+{
+  "concurrency": 4,
+  "downloads_dir": "downloads",
+  "images_dir": "downloads/images",
+  "mongo": {
+    "uri": "mongodb://localhost:27017",
+    "db_name": "cecar_articulos",
+    "collection": "articulos"
+  }
+}
