@@ -56,6 +56,7 @@ def buscar():
         "resultados.html",
         query=q,
         xml_path=xml_path,
+        xml_filename=os.path.basename(xml_path),
         total=counts["total_results"],
         returned=counts["returned_results"],
         start=start,
@@ -69,9 +70,52 @@ def buscar():
 def procesar():
     global procesador_obj, procesador_thread, start_time
 
-    xml_path = request.args.get("xml_path")
-    if not xml_path or not os.path.exists(xml_path):
-        return jsonify({"error": "XML no encontrado"}), 400
+    # DEBUG para ver qué está llegando
+    print(f"DEBUG - Todos los parámetros recibidos: {dict(request.args)}")
+    
+    # En lugar de recibir el nombre del archivo, buscar el XML más reciente
+    query = request.args.get("query")  # Recibiremos el query de búsqueda
+    
+    print(f"DEBUG - Query recibido: '{query}'")
+    
+    if not query:
+        return jsonify({"error": "No se especificó el query de búsqueda"}), 400
+    
+    # Buscar archivos XML que coincidan con el query
+    if not os.path.exists(DOWNLOADS_DIR):
+        return jsonify({"error": "Directorio downloads no existe"}), 400
+    
+    xml_files = []
+    query_normalized = query.replace(' ', '-').lower()
+    
+    print(f"DEBUG - Buscando archivos que contengan: arxiv_{query_normalized}")
+    
+    for file in os.listdir(DOWNLOADS_DIR):
+        print(f"DEBUG - Examinando archivo: {file}")
+        if file.startswith("arxiv_") and file.endswith(".xml"):
+            # Buscar archivos XML que contengan el query normalizado
+            if query_normalized in file.lower():
+                file_path = os.path.join(DOWNLOADS_DIR, file)
+                file_time = os.path.getmtime(file_path)
+                xml_files.append((file_path, file_time))
+                print(f"DEBUG - Archivo coincide: {file}")
+    
+    print(f"DEBUG - Archivos XML encontrados: {len(xml_files)}")
+    
+    if not xml_files:
+        return jsonify({"error": f"No se encontró XML para el query: {query}. Archivos disponibles: {[f for f in os.listdir(DOWNLOADS_DIR) if f.endswith('.xml')]}"}), 400
+    
+    # Obtener el archivo más reciente
+    xml_path = max(xml_files, key=lambda x: x[1])[0]
+    
+    # DEBUG: Agregar estas líneas temporalmente
+    print(f"DEBUG - query recibido: '{query}'")
+    print(f"DEBUG - xml_path encontrado: '{xml_path}'")
+    print(f"DEBUG - xml_path existe: {os.path.exists(xml_path)}")
+    print(f"DEBUG - archivos XML encontrados: {[f[0] for f in xml_files]}")
+    
+    if not os.path.exists(xml_path):
+        return jsonify({"error": f"XML no encontrado: '{xml_path}'"}), 400
 
     if procesador_thread and procesador_thread.is_alive():
         return jsonify({"status": "Ya hay un procesamiento en curso"}), 400

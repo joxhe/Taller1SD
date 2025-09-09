@@ -3,11 +3,40 @@
   <head>
     <meta charset="utf-8" />
     <title>Resultados — {{ query }}</title>
+  </head>
+  <body>
+    <a href="/">← Nueva búsqueda</a>
+
+    <h2>Resultados para: "{{ query }}"</h2>
+
+    <p><strong>Total global (API arXiv):</strong> {{ total }}</p>
+    <p><strong>Devueltos en esta página:</strong> {{ returned }}</p>
+    <p><strong>Archivo XML guardado:</strong> {{ xml_filename }}</p>
+
+    <form action="/buscar" method="get" style="margin-top:1rem">
+      <input type="hidden" name="q" value="{{ query }}" />
+      <input type="hidden" name="max" value="{{ max_results }}" />
+      <input type="hidden" name="start" value="{{ start + max_results }}" />
+      <button type="submit">Siguiente página →</button>
+    </form>
+
+    <hr>
+    <h3>Procesamiento Concurrente</h3>
+    <p><strong>DEBUG - Query original:</strong> "{{ query }}"</p>
+    <p><strong>DEBUG - XML filename:</strong> "{{ xml_filename }}"</p>
+    <button onclick="iniciarProcesamiento()">Procesar artículos</button>
+    <p id="status"></p>
+    <p id="progreso"></p>
+
     <script>
       let progresoInterval = null;
 
-      function iniciarProcesamiento(xmlFilename) {
-        fetch(`/procesar?xml_path=${encodeURIComponent(xmlFilename)}`)
+      function iniciarProcesamiento() {
+        // Enviar directamente el query original
+        const queryOriginal = "{{ query }}";
+        console.log("DEBUG - Query a enviar:", queryOriginal);
+        
+        fetch(`/procesar?query=${encodeURIComponent(queryOriginal)}`)
           .then(resp => resp.json())
           .then(data => {
             if (data.status) {
@@ -34,30 +63,12 @@
             } else if (data.error) {
               document.getElementById("status").innerText = "❌ " + data.error;
             }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            document.getElementById("status").innerText = "❌ Error de conexión";
           });
       }
     </script>
-  </head>
-  <body>
-    <a href="/">← Nueva búsqueda</a>
-
-    <h2>Resultados para: “{{ query }}”</h2>
-
-    <p><strong>Total global (API arXiv):</strong> {{ total }}</p>
-    <p><strong>Devueltos en esta página:</strong> {{ returned }}</p>
-    <p><strong>Archivo XML guardado:</strong> {{ xml_filename }}</p>
-
-    <form action="/buscar" method="get" style="margin-top:1rem">
-      <input type="hidden" name="q" value="{{ query }}" />
-      <input type="hidden" name="max" value="{{ max_results }}" />
-      <input type="hidden" name="start" value="{{ start + max_results }}" />
-      <button type="submit">Siguiente página →</button>
-    </form>
-
-    <hr>
-    <h3>Procesamiento Concurrente</h3>
-    <button onclick="iniciarProcesamiento('{{ xml_filename }}')">Procesar artículos</button>
-    <p id="status"></p>
-    <p id="progreso"></p>
   </body>
 </html>

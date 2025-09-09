@@ -26,7 +26,12 @@ class ArxivClient:
         fname = f"arxiv_{slugify(query)}_{start}_{max_results}_{stamp}.xml"
         fpath = os.path.join(self.downloads_dir, fname)
 
+        print(f"DEBUG - Guardando XML en: {fpath}")  # DEBUG
+        print(f"DEBUG - Ruta absoluta: {os.path.abspath(fpath)}")  # DEBUG
+
         with open(fpath, "wb") as f:
             f.write(resp.content)
 
-        return fpath
+        print(f"DEBUG - Archivo guardado exitosamente: {os.path.exists(fpath)}")  # DEBUG
+        
+        return os.path.abspath(fpath)  # Devolver ruta absoluta
