@@ -7,7 +7,7 @@ def generar_keywords(texto: str, modelo: str = "mistral") -> list:
     - texto: título + resumen (y texto completo si quieres).
     - modelo: modelo local de Ollama (ej: 'mistral', 'llama2', etc.)
     """
-    prompt = f"Extrae entre 5 y 10 palabras clave representativas del siguiente texto en español:\n\n{texto}\n\nDevuélvelas en formato JSON como una lista de strings."
+    prompt = f"Extrae entre 5 palabras clave representativas del siguiente texto en español:\n\n{texto}\n\nDevuélvelas en formato JSON como una lista de strings. pero sin decir '[keywords:], solo la lista."
 
     # Ejecuta ollama desde Python con codificación UTF-8
     try:
