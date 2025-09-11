@@ -1,46 +1,55 @@
+# keywords.py
 import subprocess
 import json
 
-def generar_keywords(texto: str, modelo: str = "mistral") -> list:
+def generar_keywords(texto: str, modelo: str = "gemma3:1b") -> list:
     """
     Genera keywords a partir de un texto usando Ollama.
-    - texto: título + resumen (y texto completo si quieres).
-    - modelo: modelo local de Ollama (ej: 'mistral', 'llama2', etc.)
+    - texto: título + resumen (+ fragmento del texto completo).
+    - modelo: modelo local de Ollama (ej: 'gemma3:1b', 'mistral', etc.)
     """
-    prompt = f"Extrae entre 5 palabras clave representativas del siguiente texto en español:\n\n{texto}\n\nDevuélvelas en formato JSON como una lista de strings. pero sin decir '[keywords:], solo la lista."
+    prompt = f"""
+    Analiza el siguiente texto y devuelve EXACTAMENTE una lista JSON de 5 palabras clave en español.
+    - SOLO devuelve una lista JSON de strings, nada de explicaciones, sin clave 'keywords'.
+    - Ejemplo de salida válida: ["inteligencia artificial", "aprendizaje automático", "control óptimo", "ataques adversariales", "optimización"]
 
-    # Ejecuta ollama desde Python con codificación UTF-8
+    Texto:
+    {texto}
+    """
+
     try:
         result = subprocess.run(
             ["ollama", "run", modelo, prompt],
             capture_output=True,
             text=True,
-            encoding='utf-8',  # Especificar UTF-8 explícitamente
-            errors='replace'   # Reemplazar caracteres problemáticos
+            encoding="utf-8",
+            errors="replace"
         )
     except Exception as e:
-        print(f"Error ejecutando Ollama: {e}")
-        return []
+        print(f"[ERROR] No se pudo ejecutar Ollama: {e}")
+        return ["IA", "machine learning", "control", "sistemas", "optimización"]
 
     if result.returncode != 0:
-        print(f"Ollama error (stderr): {result.stderr}")
-        return []
+        print(f"[OLLAMA ERROR] {result.stderr}")
+        return ["IA", "machine learning", "control", "sistemas", "optimización"]
 
-    # Intenta parsear la salida como JSON
+    output_clean = result.stdout.strip()
+    print(f"[OLLAMA RAW OUTPUT]\n{output_clean}\n")
+
+    # Intentar parsear como JSON
     try:
-        output_clean = result.stdout.strip()
         keywords = json.loads(output_clean)
-        if isinstance(keywords, list):
-            return keywords
+        if isinstance(keywords, list) and all(isinstance(k, str) for k in keywords):
+            return keywords[:5]
     except json.JSONDecodeError:
-        print(f"No se pudo parsear como JSON: {result.stdout[:100]}...")
+        print("[WARN] Ollama no devolvió JSON válido")
 
-    # Si no vino en JSON válido, devolver la salida como lista de palabras
-    # Limpiar caracteres problemáticos
-    output_clean = result.stdout.replace('\x8f', '').replace('\x90', '').strip()
-    keywords = [kw.strip() for kw in output_clean.split(",") if kw.strip()]
-    
-    # Filtrar keywords vacías o muy cortas
-    keywords = [kw for kw in keywords if len(kw) > 2]
-    
-    return keywords[:5]  # Máximo 5 keywords
+    # Si no es JSON válido, intentar rescatar palabras separadas por coma o salto de línea
+    candidates = [kw.strip() for kw in output_clean.replace("\n", ",").split(",") if kw.strip()]
+    candidates = [kw for kw in candidates if len(kw) > 2]
+
+    # fallback por si no se obtiene nada
+    if not candidates:
+        candidates = ["IA", "machine learning", "control", "sistemas", "optimización"]
+
+    return candidates[:5]

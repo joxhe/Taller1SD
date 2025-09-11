@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ articulo.title }}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;margin:0;padding:20px}
+    .container{max-width:960px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.08)}
+    h1{margin-bottom:10px;color:#222}
+    .meta{color:#555;font-size:.9rem;margin-bottom:16px}
+    .full-text{white-space:pre-line;line-height:1.5;color:#333}
+    img.full{max-width:100%;margin:10px 0;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+    .btn-back{display:inline-block;margin-top:20px;padding:8px 12px;background:#0d6efd;color:#fff;text-decoration:none;border-radius:6px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{{ articulo.title }}</h1>
+
+    <div class="meta">
+      <strong>Autores:</strong> {{ articulo.authors | join(', ') if articulo.authors else '—' }} <br>
+      <strong>Publicado:</strong> {{ articulo.published or '—' }} <br>
+      <strong>Categorías:</strong> {{ articulo.categories | join(', ') if articulo.categories else '—' }}
+    </div>
+
+    {% if articulo.images and articulo.images|length > 0 %}
+      <div>
+        {% for img in articulo.images %}
+          <img class="full" src="{{ img }}" alt="Imagen del artículo">
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <h3>Resumen</h3>
+    <p>{{ articulo.summary }}</p>
+
+    <h3>Texto completo</h3>
+    <div class="full-text">
+      {{ articulo.full_text }}
+    </div>
+
+    <a href="{{ url_for('listar_articulos') }}" class="btn-back">← Volver al listado</a>
+  </div>
+</body>
+</html>

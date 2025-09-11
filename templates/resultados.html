@@ -3,45 +3,139 @@
   <head>
     <meta charset="utf-8" />
     <title>Resultados — {{ query }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <style>
+      .success-section {
+        background: linear-gradient(135deg, #d4edda, #c3e6cb);
+        border: 2px solid #28a745;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: center;
+        animation: slideIn 0.5s ease-out;
+      }
+      
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      
+      .btn-view-articles {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        border: none;
+        color: white;
+        padding: 12px 30px;
+        font-size: 1.1rem;
+        font-weight: bold;
+        border-radius: 8px;
+        text-decoration: none;
+        display: inline-block;
+        margin: 10px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+      }
+      
+      .btn-view-articles:hover {
+        background: linear-gradient(135deg, #218838, #1ea584);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        color: white;
+        text-decoration: none;
+      }
+      
+      .progress-bar {
+        transition: width 0.3s ease;
+      }
+      
+      .processing-info {
+        background: #f8f9fa;
+        border-left: 4px solid #007bff;
+        padding: 15px;
+        margin: 15px 0;
+        border-radius: 5px;
+      }
+      
+      .status-processing {
+        color: #007bff;
+        font-weight: bold;
+      }
+      
+      .status-completed {
+        color: #28a745;
+        font-weight: bold;
+      }
+    </style>
   </head>
-  <body>
-    <a href="/">← Nueva búsqueda</a>
+  <body class="container mt-4">
+    <a href="/" class="btn btn-secondary mb-3">← Nueva búsqueda</a>
 
     <h2>Resultados para: "{{ query }}"</h2>
 
-    <p><strong>Total global (API arXiv):</strong> {{ total }}</p>
-    <p><strong>Devueltos en esta página:</strong> {{ returned }}</p>
-    <p><strong>Archivo XML guardado:</strong> {{ xml_filename }}</p>
+    <div class="row">
+      <div class="col-md-8">
+        <p><strong>Total global (API arXiv):</strong> {{ total }}</p>
+        <p><strong>Devueltos en esta página:</strong> {{ returned }}</p>
+        <p><strong>Archivo XML guardado:</strong> <small class="text-muted">{{ xml_path }}</small></p>
+      </div>
+    </div>
 
-    <form action="/buscar" method="get" style="margin-top:1rem">
+    <!-- Botón siguiente página -->
+    <form action="/buscar" method="get" class="mt-3">
       <input type="hidden" name="q" value="{{ query }}" />
       <input type="hidden" name="max" value="{{ max_results }}" />
       <input type="hidden" name="start" value="{{ start + max_results }}" />
-      <button type="submit">Siguiente página →</button>
+      <button type="submit" class="btn btn-primary">Siguiente página →</button>
     </form>
 
     <hr>
     <h3>Procesamiento Concurrente</h3>
-    <p><strong>DEBUG - Query original:</strong> "{{ query }}"</p>
-    <p><strong>DEBUG - XML filename:</strong> "{{ xml_filename }}"</p>
-    <button onclick="iniciarProcesamiento()">Procesar artículos</button>
-    <p id="status"></p>
-    <p id="progreso"></p>
+    <button onclick="iniciarProcesamiento()" id="btnProcesar" class="btn btn-success">Procesar artículos</button>
+
+    <div class="processing-info mt-3" id="processingInfo" style="display: none;">
+      <p id="status" class="status-processing"></p>
+      <div class="progress mb-3" style="display: none;" id="progressContainer">
+        <div class="progress-bar" role="progressbar" id="progressBar" style="width: 0%"></div>
+      </div>
+      <p id="progreso"></p>
+    </div>
+
+    <!-- Sección de éxito que aparece cuando termina -->
+    <div class="success-section" id="successSection" style="display: none;">
+      <h4>🎉 ¡Procesamiento Completado!</h4>
+      <p>Todos los artículos han sido procesados exitosamente y guardados en la base de datos.</p>
+      <a href="/articulos" class="btn-view-articles">
+        📚 Ver Artículos Procesados
+      </a>
+      <br>
+      <small class="text-muted">Los artículos incluyen texto completo, imágenes extraídas y palabras clave generadas con IA</small>
+    </div>
 
     <script>
       let progresoInterval = null;
 
       function iniciarProcesamiento() {
-        // Enviar directamente el query original
-        const queryOriginal = "{{ query }}";
-        console.log("DEBUG - Query a enviar:", queryOriginal);
-        
-        fetch(`/procesar?query=${encodeURIComponent(queryOriginal)}`)
+        const xmlPath = "{{ xml_path }}";
+        console.log("DEBUG - XML a enviar:", xmlPath);
+
+        // Deshabilitar botón y mostrar info de procesamiento
+        document.getElementById("btnProcesar").disabled = true;
+        document.getElementById("btnProcesar").innerText = "Procesando...";
+        document.getElementById("processingInfo").style.display = "block";
+        document.getElementById("successSection").style.display = "none";
+
+        fetch(`/procesar?xml_path=${encodeURIComponent(xmlPath)}`)
           .then(resp => resp.json())
           .then(data => {
             if (data.status) {
               document.getElementById("status").innerText = data.status;
-              // iniciar polling de progreso
+              document.getElementById("progressContainer").style.display = "block";
+
               progresoInterval = setInterval(() => {
                 fetch("/progreso")
                   .then(resp => resp.json())
@@ -49,26 +143,94 @@
                     if (p.error) {
                       document.getElementById("progreso").innerText = p.error;
                       clearInterval(progresoInterval);
+                      resetButton();
                       return;
                     }
+
+                    // Actualizar barra de progreso
+                    const percentage = p.total > 0 ? Math.round((p.procesados / p.total) * 100) : 0;
+                    document.getElementById("progressBar").style.width = percentage + "%";
+                    document.getElementById("progressBar").innerText = percentage + "%";
+                    
                     document.getElementById("progreso").innerText =
                       `Procesados: ${p.procesados}/${p.total} — Tiempo: ${p.elapsed}s`;
 
                     if (p.done) {
-                      document.getElementById("status").innerText = "✅ Procesamiento finalizado";
                       clearInterval(progresoInterval);
+                      // Ocultar info de procesamiento
+                      document.getElementById("processingInfo").style.display = "none";
+                      // Mostrar sección de éxito con botón
+                      document.getElementById("successSection").style.display = "block";
+                      resetButton();
                     }
+                  })
+                  .catch(error => {
+                    console.error('Error checking progress:', error);
+                    clearInterval(progresoInterval);
+                    resetButton();
                   });
               }, 1000);
             } else if (data.error) {
               document.getElementById("status").innerText = "❌ " + data.error;
+              resetButton();
             }
           })
           .catch(error => {
             console.error('Error:', error);
             document.getElementById("status").innerText = "❌ Error de conexión";
+            resetButton();
           });
       }
+
+      function resetButton() {
+        document.getElementById("btnProcesar").disabled = false;
+        document.getElementById("btnProcesar").innerText = "Procesar artículos";
+      }
+
+      // Opcional: verificar si ya hay un procesamiento en curso al cargar la página
+      window.addEventListener('load', function() {
+        fetch("/progreso")
+          .then(resp => resp.json())
+          .then(p => {
+            if (!p.error && p.total > 0) {
+              // Hay un procesamiento en curso, activar el monitoreo
+              document.getElementById("btnProcesar").disabled = true;
+              document.getElementById("btnProcesar").innerText = "Procesando...";
+              document.getElementById("processingInfo").style.display = "block";
+              document.getElementById("progressContainer").style.display = "block";
+              
+              // Iniciar monitoreo del progreso existente
+              progresoInterval = setInterval(() => {
+                fetch("/progreso")
+                  .then(resp => resp.json())
+                  .then(p => {
+                    if (p.error) {
+                      clearInterval(progresoInterval);
+                      resetButton();
+                      return;
+                    }
+
+                    const percentage = p.total > 0 ? Math.round((p.procesados / p.total) * 100) : 0;
+                    document.getElementById("progressBar").style.width = percentage + "%";
+                    document.getElementById("progressBar").innerText = percentage + "%";
+                    document.getElementById("progreso").innerText =
+                      `Procesados: ${p.procesados}/${p.total} — Tiempo: ${p.elapsed}s`;
+
+                    if (p.done) {
+                      clearInterval(progresoInterval);
+                      document.getElementById("processingInfo").style.display = "none";
+                      document.getElementById("successSection").style.display = "block";
+                      resetButton();
+                    }
+                  });
+              }, 1000);
+            }
+          })
+          .catch(error => {
+            // No hay procesamiento en curso, todo normal
+            console.log('No processing in progress');
+          });
+      });
     </script>
   </body>
 </html>

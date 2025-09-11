@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from descargador import Descargador
 from extractor import ExtractorPDF
 from almacen import AlmacenMongo
-from keywords import generar_keywords  # ✅ usamos Ollama ahora
+from keywords import generar_keywords
 
 # Namespaces para arXiv Atom
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -32,11 +32,48 @@ class ProcesadorArticulos:
             collection_name=mongo_cfg.get("collection", "articulos")
         )
 
-        # progreso compartido
+        # THREAD SAFE: progreso compartido con lock
         self.total_a_procesar = 0
-        self.procesados = 0
-        self.lock = threading.Lock()
+        self._procesados = 0  # variable privada
+        self.progress_lock = threading.Lock()  # lock específico para progreso
         self.stop_monitor = threading.Event()
+
+        # Thread pool para conexiones de BD separadas
+        self.almacenes_por_hilo = {}  # dict thread_id -> almacen instance
+        self.almacenes_lock = threading.Lock()
+
+    def _get_almacen_for_thread(self):
+        """Obtiene una instancia de almacén específica para el hilo actual"""
+        thread_id = threading.get_ident()
+        
+        with self.almacenes_lock:
+            if thread_id not in self.almacenes_por_hilo:
+                mongo_cfg = self.config.get("mongo", {})
+                self.almacenes_por_hilo[thread_id] = AlmacenMongo(
+                    uri=mongo_cfg.get("uri", "mongodb://localhost:27017"),
+                    db_name=mongo_cfg.get("db_name", "cecar_articulos"),
+                    collection_name=mongo_cfg.get("collection", "articulos")
+                )
+        
+        return self.almacenes_por_hilo[thread_id]
+
+    def increment_procesados(self):
+        """Thread-safe increment del contador"""
+        with self.progress_lock:
+            self._procesados += 1
+
+    def get_progreso(self):
+        """Thread-safe getter del progreso"""
+        with self.progress_lock:
+            return {
+                "procesados": self._procesados,
+                "total": self.total_a_procesar
+            }
+
+    @property
+    def procesados(self):
+        """Propiedad thread-safe para compatibilidad"""
+        return self.get_progreso()["procesados"]
 
     def _parse_xml_entries(self):
         tree = ET.parse(self.xml_path)
@@ -78,7 +115,11 @@ class ProcesadorArticulos:
     def _procesar_un_articulo(self, metadata: dict):
         """
         Función que ejecutan los hilos: descargar, extraer y guardar.
+        CORREGIDO: manejo thread-safe del progreso y conexiones BD
         """
+        thread_id = threading.get_ident()
+        print(f"[HILO-{thread_id}] Iniciando procesamiento de {metadata.get('arxiv_id', 'unknown')}")
+        
         try:
             # 1) Descargar PDF
             pdf_url = metadata.get("pdf_url")
@@ -86,10 +127,13 @@ class ProcesadorArticulos:
                 .replace("/", "_").replace(" ", "_")[:120]
             pdf_name = f"{slug}.pdf"
             pdf_path = None
+            
             if pdf_url:
                 try:
                     pdf_path = self.descargador.descargar_pdf(pdf_url, dest_name=pdf_name)
-                except Exception:
+                    print(f"[HILO-{thread_id}] PDF descargado: {pdf_path}")
+                except Exception as e:
+                    print(f"[HILO-{thread_id}] [ERROR] No se pudo descargar PDF: {e}")
                     pdf_path = None
 
             # 2) Extraer texto e imágenes
@@ -100,7 +144,9 @@ class ProcesadorArticulos:
                     res = self.extractor.extract(pdf_path, article_slug=slug or "sin_slug")
                     text = res.get("text", "")
                     images = res.get("images", [])
-                except Exception:
+                    print(f"[HILO-{thread_id}] Texto e imágenes extraídos para {slug}")
+                except Exception as e:
+                    print(f"[HILO-{thread_id}] [ERROR] No se pudo extraer PDF: {e}")
                     text = ""
                     images = []
 
@@ -108,64 +154,90 @@ class ProcesadorArticulos:
             texto_base = " ".join(filter(None, [
                 metadata.get("title", ""),
                 metadata.get("summary", ""),
-                text[:1500]  # enviamos solo un fragmento del PDF
+                text[:1500]
             ]))
+            
             try:
-                keywords = generar_keywords(texto_base, modelo="mistral")
+                keywords = generar_keywords(texto_base, modelo="gemma3:1b")
+                print(f"[HILO-{thread_id}] Keywords generadas para {slug}: {keywords}")
             except Exception as e:
-                print(f"Error generando keywords con Ollama: {e}")
+                print(f"[HILO-{thread_id}] [ERROR] Generando keywords con Ollama: {e}")
                 keywords = []
 
-            # 4) Guardar en Mongo
+            # 4) Guardar en Mongo - USANDO CONEXIÓN ESPECÍFICA DEL HILO
             try:
-                self.almacen.guardar_articulo(metadata, text, images, keywords)
+                almacen_hilo = self._get_almacen_for_thread()
+                almacen_hilo.guardar_articulo(metadata, text, images, keywords)
+                print(f"[HILO-{thread_id}] Artículo guardado en Mongo: {slug}")
             except Exception as e:
-                print(f"Error guardando en Mongo: {e}")
+                print(f"[HILO-{thread_id}] [ERROR] Guardando en Mongo: {e}")
 
-            # update progreso
-            with self.lock:
-                self.procesados += 1
-
+            # THREAD SAFE: update progreso
+            self.increment_procesados()
             return True
-        except Exception:
-            with self.lock:
-                self.procesados += 1
+            
+        except Exception as e:
+            print(f"[HILO-{thread_id}] [ERROR] Fallo inesperado en procesar artículo: {e}")
+            # Incrementar contador incluso en caso de error
+            self.increment_procesados()
             return False
 
     def _monitor(self, start_ts):
-        # Imprime cada 1 segundo el progreso hasta que stop_monitor esté seteado
+        """Monitor thread-safe del progreso"""
         while not self.stop_monitor.is_set():
-            with self.lock:
-                p = self.procesados
-                t = self.total_a_procesar
+            progreso = self.get_progreso()
+            p = progreso["procesados"]
+            t = progreso["total"]
+            
             elapsed = int(time.time() - start_ts)
             print(f"[Monitor] Procesados: {p}/{t} — Tiempo transcurrido: {elapsed}s")
+            
             if p >= t:
                 break
+            
             self.stop_monitor.wait(timeout=1)
 
     def run(self):
         entries = self._parse_xml_entries()
         self.total_a_procesar = len(entries)
+        
         if self.total_a_procesar == 0:
             print("No hay artículos para procesar en el XML.")
             return
 
-        print(f"Iniciando procesamiento de {self.total_a_procesar} artículos con {self.concurrency} hilos (más hilo principal).")
+        print(f"Iniciando procesamiento de {self.total_a_procesar} artículos con {self.concurrency} hilos.")
 
         start_ts = time.time()
         monitor_thread = threading.Thread(target=self._monitor, args=(start_ts,), daemon=True)
         monitor_thread.start()
 
-        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
+        # Usar ThreadPoolExecutor para mejor control de concurrencia
+        with ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="ArticleProcessor") as executor:
+            # Enviar todas las tareas
             futures = [executor.submit(self._procesar_un_articulo, entry) for entry in entries]
+            
+            # Procesar resultados conforme se completan
             for fut in as_completed(futures):
                 try:
-                    _ = fut.result()
-                except Exception:
-                    pass
+                    resultado = fut.result()
+                    if not resultado:
+                        print("[WARNING] Un hilo falló en el procesamiento")
+                except Exception as e:
+                    print(f"[ERROR] Excepción en hilo: {e}")
 
+        # Finalizar monitor
         self.stop_monitor.set()
         monitor_thread.join(timeout=2)
+        
         total_time = int(time.time() - start_ts)
-        print(f"Procesamiento finalizado. Procesados: {self.procesados}/{self.total_a_procesar}. Tiempo total: {total_time}s")
+        final_progress = self.get_progreso()
+        print(f"Procesamiento finalizado. Procesados: {final_progress['procesados']}/{final_progress['total']}. Tiempo total: {total_time}s")
+
+        # Limpiar conexiones de hilos
+        with self.almacenes_lock:
+            for almacen in self.almacenes_por_hilo.values():
+                try:
+                    almacen.client.close()
+                except:
+                    pass
+            self.almacenes_por_hilo.clear()
